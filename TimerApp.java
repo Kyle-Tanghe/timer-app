@@ -7,13 +7,9 @@ import java.awt.*;
 import java.awt.event.*;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
-/**
- *
- * @author Kyle
- */
+
 public class TimerApp {
     public static void main(String[] args) {
-        
         TimerFrame frame = new TimerFrame();
         frame.addWindowListener(new WindowAdapter(){
             @Override
@@ -31,6 +27,7 @@ public class TimerApp {
 }
 class TimerFrame extends JFrame
 {
+    private TimerFrame timerFrame = this;//this variable is used only in the anonymous inner class inside of the PropertyChangeListener inner class since calls to "this" reference the inner class itself and not the frame.
     private GridBagConstraints c = new GridBagConstraints();
     private JPanel northPanel = new JPanel(new GridBagLayout());
     private JLabel enterTextLabel = new JLabel("Enter number of minutes for timer");
@@ -41,10 +38,11 @@ class TimerFrame extends JFrame
     private JLabel startStopLabel = new JLabel("Press start to begin timer");
     private JButton startButton = new JButton("Start");
     private JButton stopButton = new JButton("Stop");
+    private JButton clearButton = new JButton("Clear");
 
     private JPanel southPanel = new JPanel(new GridBagLayout());
     private JLabel timerText = new JLabel("0:00");
-    ProcessEvents processEvents = new ProcessEvents(enterText,enterButton,startButton,stopButton,timerText);
+    ProcessEvents processEvents = new ProcessEvents(enterText,enterButton,startButton,stopButton,clearButton,timerText);
     
     //initialize important parts of the
     //app without making cosmetic code messy
@@ -54,19 +52,36 @@ class TimerFrame extends JFrame
         enterButton.addActionListener(processEvents);
         startButton.addActionListener(processEvents);
         stopButton.addActionListener(processEvents);
+        clearButton.addActionListener(processEvents);
         timerText.addPropertyChangeListener("text",new PropertyChangeListener(){
             @Override
             public void propertyChange(PropertyChangeEvent e){
-                if(e.getNewValue().toString().equals("0:00")){
-                    if(processEvents.getChangeTimerText() != null){//if the thread that handles changing timerText is alive
-                        processEvents.getChangeTimerText().interrupt();
-                        processEvents.resetTimer();
-                        enterButton.setEnabled(true);
-                        stopButton.setVisible(false);
-                        startButton.setVisible(true);
-                        enterText.setEnabled(true);
-                        Toolkit.getDefaultToolkit().beep();
-                    }
+                if(e.getNewValue().toString().equals("0:00") && processEvents.getChangeTimerText() != null){
+                    Thread beep = new Thread(new Runnable(){
+                        @Override
+                        public void run(){
+                            processEvents.stopTimer();
+                            processEvents.resetTimer();
+                            while(true){
+                                try{
+                                    Toolkit.getDefaultToolkit().beep();
+                                    Thread.sleep(1000);
+                                }catch(InterruptedException ie){return;}
+                            }
+                        }
+                    });
+                    beep.start();
+
+                    Object[] option = new Object[]{"OK"};
+                    Thread stopBeep = new Thread(new Runnable(){
+                        @Override
+                        public void run(){
+                            if(JOptionPane.showOptionDialog(timerFrame, "Timer finished", "", JOptionPane.PLAIN_MESSAGE, JOptionPane.QUESTION_MESSAGE, null, option, option[0]) == 0){
+                                beep.interrupt();
+                            }
+                        }
+                    });
+                    stopBeep.start();
                 }
             }
         });
@@ -107,6 +122,9 @@ class TimerFrame extends JFrame
         c.gridy = 1;
         stopButton.setVisible(false);
         centerPanel.add(stopButton, c);
+        c.gridx = 0;
+        c.gridy = 2;
+        centerPanel.add(clearButton, c);
 
 
         add(southPanel, BorderLayout.SOUTH);
@@ -129,6 +147,7 @@ class ProcessEvents implements ActionListener{
     private boolean startButtonClicked = false;
     private boolean stopButtonClicked = false;
     private boolean enterButtonClicked = false;
+    private boolean clearButtonClicked = false;
     private int timerAmountInMinutes;
     private int timerSeconds;
     private long timeToWaitUntilNextRun = 1000;
@@ -138,12 +157,15 @@ class ProcessEvents implements ActionListener{
     private JButton enterButton;
     private JButton startButton;
     private JButton stopButton;
+    private JButton clearButton;
     private JLabel timerText;
-    public ProcessEvents(JTextField enterText,JButton enterButton,JButton startButton,JButton stopButton,JLabel timerText){
+    public ProcessEvents(JTextField enterText,JButton enterButton,JButton startButton,
+            JButton stopButton,JButton clearButton,JLabel timerText){
         this.enterText = enterText;
         this.enterButton = enterButton;
         this.startButton = startButton;
         this.stopButton = stopButton;
+        this.clearButton = clearButton;
         this.timerText = timerText;
     }
     @Override
@@ -160,7 +182,6 @@ class ProcessEvents implements ActionListener{
                     enterText.setEnabled(false);
                     startTimer(currentTimeMillis());
                 }
-                //enterButton.setEnabled(false);
             }else{JOptionPane.showMessageDialog(null,"Please enter new value","Error",JOptionPane.ERROR_MESSAGE);}
         }
         else if(e.getSource().equals(stopButton)){
@@ -176,6 +197,16 @@ class ProcessEvents implements ActionListener{
                 enterButtonClicked = true;
                 initializeTimer();
             }else{JOptionPane.showMessageDialog(null,"Please enter new value","Error",JOptionPane.ERROR_MESSAGE);}
+        }
+        else if(e.getSource().equals(clearButton)){
+            if(startButtonClicked){
+                clearButtonClicked = true;
+                stopTimer();
+                resetTimer();
+            }else{
+                clearButtonClicked = true;
+                resetTimer();
+            }
         }
     }
     public void startTimer(long startTime){
@@ -194,10 +225,21 @@ class ProcessEvents implements ActionListener{
         return changeTimerText;
     }
     public void resetTimer(){
+        startButtonClicked = false;
         stopButtonClicked = false;
         enterButtonClicked = false;
+        changeTimerText = null;
+        timeToWaitUntilNextRun = 1000;
+        stopButtonClicked = false;
+        enterButtonClicked = false;
+        enterButton.setEnabled(true);
+        stopButton.setVisible(false);
+        startButton.setVisible(true);
+        timerAmountInMinutes = 0;
+        timerSeconds = 0;
         enterText.setEnabled(true);
         enterText.setFocusable(true);
+        timerText.setText("0:00");
     }
     private class TimerTextChanger implements Runnable
     {
@@ -215,7 +257,7 @@ class ProcessEvents implements ActionListener{
                         timerSeconds = 60;
                         timerAmountInMinutes--;
                     }
-                    if(stopButtonClicked){
+                    if(stopButtonClicked || clearButtonClicked){
                         Thread.sleep(timeToWaitUntilNextRun);
                         timerText.setText(timerAmountInMinutes + ":" + String.format("%02d",--timerSeconds));
                         timeToWaitUntilNextRun = 1000;
@@ -239,16 +281,6 @@ class ProcessEvents implements ActionListener{
         }
     }
 }
-
-
-
-
-
-
-
-
-
-
 class FilterTextBox extends DocumentFilter{
     @Override
     public void insertString(FilterBypass fb, int offset, String string,
